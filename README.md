@@ -139,6 +139,45 @@ reaching dependent uploads. Reported to Sourcegraph engineering.
   occurrence (0-indexed line/char, start of the identifier). An off-by-one
   range silently returns degraded results.
 
+### 11. Python standard library symbols can't get precise nav
+
+Imports from the Python standard library (e.g. `from uuid import uuid4`, `os`,
+`datetime`, `typing`) will **never** resolve precisely — they stay search-based
+no matter what you index. This is a structural trait of scip-python, not a
+misconfiguration:
+
+- scip-python doesn't resolve stdlib imports to real CPython source. It resolves
+  them to **typeshed stub files (`.pyi`) bundled inside the indexer**, and labels
+  them with a **synthetic package descriptor** `python-stdlib <pyversion>`, e.g.:
+  ```
+  scip-python python python-stdlib 3.9 uuid/uuid4().
+  ```
+- No real repository, when indexed normally, reproduces that synthetic
+  `python-stdlib@3.9` package identity with matching symbol paths. So there is
+  nothing to upload that *defines* those symbols → the definition side never
+  exists on the instance.
+- Because there's no precise definition, **"Go to definition" falls back to
+  search-based nav**, which name-matches across all indexed repos and can land on
+  an unrelated repo that happens to vendor a copy of the stdlib (we saw `uuid4`
+  jump to `microsoft/vscode-python-web-wasm`). This is expected, not a bug.
+- **Hover docs can still be precise**: scip-python reads the *real* installed
+  module's docstring at index time and embeds it in your service's index, so the
+  tooltip shows accurate library documentation even though navigation doesn't
+  work. Precise hover ≠ precise go-to-definition.
+
+This limitation is **language-specific**, not a Sourcegraph-wide rule. It depends
+on how each indexer sources its stdlib:
+
+- **Go** (scip-go): stdlib is real source in `github.com/golang/go` → precise nav
+  *is* achievable (index it with `--go-version` and upload).
+- **Java** (scip-java): JDK can be made precise if its source is indexed with
+  matching coordinates.
+- **TypeScript/JS**: built-in `lib.*.d.ts` behaves like Python (synthetic), but
+  Node APIs resolve precisely if `@types/node` is indexed.
+
+There is a `# NOTE:` comment above the stdlib import in each service's `app.py`
+documenting this for readers of the code.
+
 ## Helper tools
 
 Two scripts in this repo use the legacy `lsif.references` API to pull cross-repo

@@ -1,0 +1,6 @@
+.venv-scip/
+.playwright-mcp/
+__pycache__/
+*.pyc
+*.scip
+.env.scip
